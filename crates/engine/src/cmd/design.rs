@@ -943,27 +943,21 @@ pub fn date_field_text(kind: &str) -> String {
     DateTime::now_local().and_then(|now| field_text(kind, None, now)).unwrap_or_default()
 }
 
-/// Days since 1970-01-01 → (year, month, day).
+/// Days since 1970-01-01 → (year, month, day), exact for every `i64`.
 pub fn civil(z: i64) -> (i64, u32, u32) {
-    // `NaiveDate` counts from 0001-01-01 (num_days_from_ce 1); 1970-01-01 is 719_163.
-    match z.checked_add(719_163).and_then(|n| i32::try_from(n).ok()).and_then(chrono::NaiveDate::from_num_days_from_ce_opt) {
-        Some(d) => (i64::from(chrono::Datelike::year(&d)), chrono::Datelike::month(&d), chrono::Datelike::day(&d)),
-        None => civil_fallback(z),
+    use chrono::Datelike;
+    // `NaiveDate` covers only about ±262143 years, and the Gregorian calendar repeats every 400
+    // years (146_097 days). chrono converts the day within its cycle and whole cycles go back
+    // into the year (an i128 for i64::MAX/MIN). 1970-01-01 is `num_days_from_ce` 719_163, and
+    // 0..146_097 days from it always fits.
+    let (cycles, rest) = (z.div_euclid(146_097), z.rem_euclid(146_097));
+    match i32::try_from(rest + 719_163).ok().and_then(chrono::NaiveDate::from_num_days_from_ce_opt) {
+        Some(d) => {
+            let y = i128::from(d.year()) + i128::from(cycles) * 400;
+            (i64::try_from(y).unwrap_or(if y < 0 { i64::MIN } else { i64::MAX }), d.month(), d.day())
+        }
+        None => (1970, 1, 1),
     }
-}
-
-/// [`civil`] for values outside `NaiveDate`'s range (Howard Hinnant's algorithm).
-fn civil_fallback(z: i64) -> (i64, u32, u32) {
-    let z = z.saturating_add(719_468);
-    let era = z.div_euclid(146_097);
-    let doe = z.rem_euclid(146_097);
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let y = yoe.saturating_add(era.saturating_mul(400));
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
-    (if m <= 2 { y.saturating_add(1) } else { y }, m, d)
 }
 
 fn master_view(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1504,10 +1498,11 @@ mod tests {
     fn civil_dates() {
         assert_eq!(super::civil(0), (1970, 1, 1));
         assert_eq!(super::civil(20_734), (2026, 10, 8));
-        // Days past `NaiveDate`'s range fall back to the hand-rolled algorithm; the extremes
-        // must not overflow or panic (the fallback uses saturating arithmetic).
-        let _ = super::civil(i64::MAX);
-        let _ = super::civil(i64::MIN);
+        // Past `NaiveDate`'s range the 400-year cycles carry the year, exactly, up to the extremes.
+        assert_eq!(super::civil(95_026_602), (262_144, 1, 1));
+        assert_eq!(super::civil(-96_465_964), (-262_145, 3, 1));
+        assert_eq!(super::civil(i64::MAX), (25_252_734_927_768_524, 7, 27));
+        assert_eq!(super::civil(i64::MIN), (-25_252_734_927_764_585, 6, 7));
     }
 
     #[test]
