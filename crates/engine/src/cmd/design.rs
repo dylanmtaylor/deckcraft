@@ -954,16 +954,16 @@ pub fn civil(z: i64) -> (i64, u32, u32) {
 
 /// [`civil`] for values outside `NaiveDate`'s range (Howard Hinnant's algorithm).
 fn civil_fallback(z: i64) -> (i64, u32, u32) {
-    let z = z + 719_468;
+    let z = z.saturating_add(719_468);
     let era = z.div_euclid(146_097);
     let doe = z.rem_euclid(146_097);
     let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let y = yoe + era * 400;
+    let y = yoe.saturating_add(era.saturating_mul(400));
     let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
     let mp = (5 * doy + 2) / 153;
     let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
     let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
-    (if m <= 2 { y + 1 } else { y }, m, d)
+    (if m <= 2 { y.saturating_add(1) } else { y }, m, d)
 }
 
 fn master_view(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1504,6 +1504,10 @@ mod tests {
     fn civil_dates() {
         assert_eq!(super::civil(0), (1970, 1, 1));
         assert_eq!(super::civil(20_734), (2026, 10, 8));
+        // Days past `NaiveDate`'s range fall back to the hand-rolled algorithm; the extremes
+        // must not overflow or panic (the fallback uses saturating arithmetic).
+        let _ = super::civil(i64::MAX);
+        let _ = super::civil(i64::MIN);
     }
 
     #[test]
