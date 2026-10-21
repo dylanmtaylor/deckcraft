@@ -131,6 +131,7 @@ Standard: craftrules `standards/never-crash.md`.
   CLI, control channel and MCP do exactly the same thing.
 - **The UI is thin**: panels read engine state and act through commands. Colours come from theme
   tokens. **Never use Tauri**; egui only.
+- **Time goes through `chrono`** (workspace dependency). Never hand-roll UTC/calendar conversion (days-to-date algorithms, leap-year math); a crate owns only its output format string.
 - **Never break wasm** (`cargo xtask wasm`).
 
 ## 5. Quality gates (before every commit)
