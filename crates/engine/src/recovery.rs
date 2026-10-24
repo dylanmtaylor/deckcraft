@@ -95,13 +95,10 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
         opts.mode(0o600);
     }
     let mut file = opts.open(&tmp).map_err(|e| EngineError::Other(format!("{}: {e}", tmp.display())))?;
-    file.write_all(bytes)
-        .and_then(|()| file.sync_all())
-        .and_then(|()| std::fs::rename(&tmp, path))
-        .map_err(|e| {
-            let _ = std::fs::remove_file(&tmp);
-            EngineError::Other(format!("{}: {e}", path.display()))
-        })
+    file.write_all(bytes).and_then(|()| file.sync_all()).and_then(|()| std::fs::rename(&tmp, path)).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        EngineError::Other(format!("{}: {e}", path.display()))
+    })
 }
 
 /// Presentations reopened per start; the rest stay on disk for the next one, so a folder
