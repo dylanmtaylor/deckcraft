@@ -64,10 +64,11 @@ impl Picture {
                 None => (std::ptr::null(), 0),
                 Some(v) => (v.as_ptr(), v.len()),
             };
-            if let Some((c_ptr, c_len, ref res)) = cached_region {
-                if c_ptr == ptr && c_len == len {
-                    return res.clone();
-                }
+            if let Some((c_ptr, c_len, ref res)) = cached_region
+                && c_ptr == ptr
+                && c_len == len
+            {
+                return res.clone();
             }
             let res = placed_region(&tf, reg);
             cached_region = Some((ptr, len, res.clone()));
