@@ -609,26 +609,43 @@ impl Chart {
             return (!secondary && self.kind != ChartType::Combo).then_some((0.0, 0.0));
         }
         let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
-        let n = ser.iter().map(|s| s.values.len()).max().unwrap_or(0);
+        let has_stacked_or_percent = ser.iter().any(|s| {
+            let k = self.series_kind(s);
+            k.stacked() || k.percent()
+        });
+
         let mut percent = false;
-        for i in 0..n {
-            let (mut p, mut m, mut stacked) = (0.0, 0.0, false);
+        if has_stacked_or_percent {
+            let n = ser.iter().map(|s| s.values.len()).max().unwrap_or(0);
+            let budget = (ser.len() * n).min(10_000_000);
+            let n_clamped = if ser.is_empty() { 0 } else { n.min(budget / ser.len()) };
+
+            for i in 0..n_clamped {
+                let (mut p, mut m, mut stacked) = (0.0, 0.0, false);
+                for s in &ser {
+                    let k = self.series_kind(s);
+                    let Some(v) = s.values.get(i).copied().flatten().filter(|v| v.is_finite()) else { continue };
+                    if k.percent() {
+                        percent = true;
+                    } else if k.stacked() {
+                        stacked = true;
+                        if v >= 0.0 { p += v } else { m += v }
+                    } else {
+                        hi = hi.max(v);
+                        lo = lo.min(v);
+                    }
+                }
+                if stacked {
+                    hi = hi.max(p);
+                    lo = lo.min(m);
+                }
+            }
+        } else {
             for s in &ser {
-                let k = self.series_kind(s);
-                let Some(v) = s.values.get(i).copied().flatten().filter(|v| v.is_finite()) else { continue };
-                if k.percent() {
-                    percent = true;
-                } else if k.stacked() {
-                    stacked = true;
-                    if v >= 0.0 { p += v } else { m += v }
-                } else {
+                for v in s.values.iter().flatten().copied().filter(|v| v.is_finite()) {
                     hi = hi.max(v);
                     lo = lo.min(v);
                 }
-            }
-            if stacked {
-                hi = hi.max(p);
-                lo = lo.min(m);
             }
         }
         if !percent {
