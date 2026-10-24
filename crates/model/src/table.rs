@@ -191,12 +191,40 @@ impl Table {
                 cell.v_merge = false;
             }
         }
+        let mut claimed = std::collections::HashSet::new();
+        let mut work: usize = 0;
+        const MAX_MERGE_WORK: usize = 100_000;
         for m in merges {
             if m.rs <= 1 && m.gs <= 1 {
                 continue;
             }
-            for r in m.r..m.r.saturating_add(m.rs) {
-                for c in m.c..m.c.saturating_add(m.gs) {
+            if !claimed.insert((m.r, m.c)) {
+                continue;
+            }
+            let r_end = m.r.saturating_add(m.rs).min(self.rows.len());
+            let c_end = m.c.saturating_add(m.gs).min(self.cols.len());
+            let mut overlaps = false;
+            for r in m.r..r_end {
+                for c in m.c..c_end {
+                    if (r != m.r || c != m.c) && claimed.contains(&(r, c)) {
+                        overlaps = true;
+                        break;
+                    }
+                }
+                if overlaps {
+                    break;
+                }
+            }
+            if overlaps {
+                continue;
+            }
+            for r in m.r..r_end {
+                for c in m.c..c_end {
+                    work += 1;
+                    if work > MAX_MERGE_WORK {
+                        return;
+                    }
+                    claimed.insert((r, c));
                     if let Some(cell) = self.cell_mut(r, c) {
                         cell.h_merge = c > m.c;
                         cell.v_merge = r > m.r;
@@ -297,9 +325,18 @@ impl Table {
     }
     /// Make every row have exactly `cols.len()` cells (repair after loading).
     pub fn normalize(&mut self) {
+        const MAX_TABLE_CELLS: usize = 50_000;
+        let max_cols = if self.rows.is_empty() { 0 } else { MAX_TABLE_CELLS / self.rows.len() };
+        if self.cols.len() > max_cols {
+            self.cols.truncate(max_cols);
+        }
         let n = self.cols.len();
         for r in &mut self.rows {
-            r.cells.resize_with(n, || Cell::new(""));
+            if r.cells.len() > n {
+                r.cells.truncate(n);
+            } else {
+                r.cells.resize_with(n, || Cell::new(""));
+            }
             for c in &mut r.cells {
                 c.grid_span = c.grid_span.max(1);
                 c.row_span = c.row_span.max(1);
@@ -637,5 +674,21 @@ mod tests {
         }
         assert!(t.split(0, 0));
         assert_eq!(t.cell(0, 0).map(|c| (c.grid_span, c.row_span)), Some((1, 1)));
+    }
+
+    #[test]
+    fn set_merges_rejects_overlapping_anchors() {
+        let mut t = Table::new(4, 4, 100.0, 10.0);
+        let merges = vec![Merge { r: 0, c: 0, rs: 2, gs: 2 }, Merge { r: 1, c: 1, rs: 2, gs: 2 }];
+        t.set_merges(merges);
+        assert_eq!(t.cell(0, 0).map(|c| (c.grid_span, c.row_span)), Some((2, 2)));
+        assert_eq!(t.cell(1, 1).map(|c| (c.grid_span, c.row_span)), Some((1, 1)));
+    }
+
+    #[test]
+    fn normalize_bounds_table_cell_grid() {
+        let mut t = Table { cols: vec![72.0; 1000], rows: (0..1000).map(|_| Row { height: 10.0, cells: vec![] }).collect(), ..Default::default() };
+        t.normalize();
+        assert!(t.rows.len() * t.cols.len() <= 50_000);
     }
 }

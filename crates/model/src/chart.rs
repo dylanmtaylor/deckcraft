@@ -1264,32 +1264,43 @@ impl Chart {
     /// points).
     pub fn box_groups(&self) -> (Vec<String>, Vec<Vec<Option<BoxStats>>>) {
         let mut groups: Vec<String> = Vec::new();
+        let mut seen = std::collections::HashSet::new();
         for c in &self.categories {
-            if !groups.contains(c) {
+            if seen.insert(c.as_str()) {
                 groups.push(c.clone());
+                if groups.len() >= 10_000 {
+                    break;
+                }
             }
         }
         if groups.is_empty() {
             groups.push(String::new());
         }
+        let group_indices: std::collections::HashMap<&str, usize> = groups.iter().enumerate().map(|(i, g)| (g.as_str(), i)).collect();
         let stats = self
             .series
             .iter()
             .map(|s| {
-                groups
-                    .iter()
-                    .map(|g| {
-                        let pts: Vec<f64> = s
-                            .values
-                            .iter()
-                            .enumerate()
-                            .filter(|(i, _)| self.categories.get(*i).map_or(g.is_empty() || self.categories.is_empty(), |c| c == g))
-                            .filter_map(|(_, v)| *v)
-                            .filter(|v| v.is_finite())
-                            .collect();
-                        box_stats_by(pts, self.inclusive_quartiles)
-                    })
-                    .collect()
+                let mut group_pts: Vec<Vec<f64>> = vec![Vec::new(); groups.len()];
+                for (i, v) in s.values.iter().enumerate() {
+                    let Some(v) = *v else { continue };
+                    if !v.is_finite() {
+                        continue;
+                    }
+                    let gi = if self.categories.is_empty() {
+                        Some(0)
+                    } else if let Some(cat) = self.categories.get(i) {
+                        group_indices.get(cat.as_str()).copied()
+                    } else {
+                        group_indices.get("").copied()
+                    };
+                    if let Some(gi) = gi
+                        && let Some(pts) = group_pts.get_mut(gi)
+                    {
+                        pts.push(v);
+                    }
+                }
+                group_pts.into_iter().map(|pts| box_stats_by(pts, self.inclusive_quartiles)).collect()
             })
             .collect();
         (groups, stats)
@@ -1362,49 +1373,54 @@ impl Chart {
         let n = self.categories.len().max(s.values.len());
         let levels: Vec<&Vec<String>> = self.category_levels.iter().take(MAX_LEVELS).collect();
         // Each leaf's path from the top level down, blanks filled from the row above.
-        let mut last: Vec<String> = vec![String::new(); levels.len()];
-        let paths: Vec<Vec<String>> = (0..n)
+        let mut last: Vec<&str> = vec![""; levels.len()];
+        let paths: Vec<Vec<&str>> = (0..n)
             .map(|i| {
                 let mut path = Vec::with_capacity(levels.len() + 1);
                 for (d, lv) in levels.iter().enumerate().rev() {
                     let l = lv.get(i).map(|x| x.trim()).unwrap_or("");
                     if !l.is_empty() {
-                        last[d] = l.to_string();
+                        last[d] = l;
                         // A new outer label starts fresh inner groups.
                         for inner in last.iter_mut().take(d) {
-                            inner.clear();
+                            *inner = "";
                         }
                     }
-                    path.push(last[d].clone());
+                    path.push(last[d]);
                 }
-                path.push(self.categories.get(i).cloned().unwrap_or_default());
+                path.push(self.categories.get(i).map(|x| x.as_str()).unwrap_or(""));
                 path
             })
             .collect();
         let value = |i: usize| s.values.get(i).copied().flatten().filter(|v| v.is_finite()).unwrap_or(0.0).max(0.0);
-        fn build(rows: &[(usize, &[String])], value: &dyn Fn(usize) -> f64) -> Vec<TreeNode> {
+        fn build(rows: &[(usize, &[&str])], value: &dyn Fn(usize) -> f64) -> Vec<TreeNode> {
             let mut out: Vec<TreeNode> = Vec::new();
             let mut i = 0;
             while i < rows.len() {
                 let (idx, path) = rows[i];
                 if path.len() <= 1 {
-                    out.push(TreeNode { name: path.first().cloned().unwrap_or_default(), value: value(idx), leaf: Some(idx), children: vec![] });
+                    out.push(TreeNode {
+                        name: path.first().copied().unwrap_or("").to_string(),
+                        value: value(idx),
+                        leaf: Some(idx),
+                        children: vec![],
+                    });
                     i += 1;
                     continue;
                 }
-                let head = &path[0];
+                let head = path[0];
                 let mut j = i;
-                while j < rows.len() && rows[j].1.len() > 1 && &rows[j].1[0] == head {
+                while j < rows.len() && rows[j].1.len() > 1 && rows[j].1[0] == head {
                     j += 1;
                 }
-                let sub: Vec<(usize, &[String])> = rows[i..j].iter().map(|(k, p)| (*k, &p[1..])).collect();
+                let sub: Vec<(usize, &[&str])> = rows[i..j].iter().map(|(k, p)| (*k, &p[1..])).collect();
                 let children = build(&sub, value);
-                out.push(TreeNode { name: head.clone(), value: children.iter().map(|c| c.value).sum(), leaf: None, children });
+                out.push(TreeNode { name: head.to_string(), value: children.iter().map(|c| c.value).sum(), leaf: None, children });
                 i = j;
             }
             out
         }
-        let rows: Vec<(usize, &[String])> = paths.iter().enumerate().map(|(i, p)| (i, p.as_slice())).collect();
+        let rows: Vec<(usize, &[&str])> = paths.iter().enumerate().map(|(i, p)| (i, p.as_slice())).collect();
         build(&rows, &value)
     }
 }

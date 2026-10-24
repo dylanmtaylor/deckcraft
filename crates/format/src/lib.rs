@@ -24,6 +24,8 @@ pub const EXTENSION: &str = "deckcraft";
 pub const VERSION: u32 = 1;
 /// Largest entry we will inflate (guards against zip bombs).
 const MAX_ENTRY: u64 = 2 << 30;
+/// Largest presentation.json manifest we will inflate.
+const MAX_MANIFEST_BYTES: u64 = 64 << 20;
 /// All embedded media and chart sidecars together, inflated (#393).
 const MAX_TOTAL_MEDIA: u64 = 4 << 30;
 /// Media items and chart sidecar parts one file may list.
@@ -106,6 +108,7 @@ pub fn sniff(bytes: &[u8]) -> bool {
     bytes.starts_with(b"PK") && [MIMETYPE, LEGACY_MIMETYPE].iter().any(|m| bytes.windows(m.len()).take(200).any(|w| w == m.as_bytes()))
 }
 
+#[allow(dead_code)]
 fn read_entry(z: &mut zip::ZipArchive<Cursor<&[u8]>>, name: &str) -> Result<Vec<u8>> {
     read_entry_max(z, name, MAX_ENTRY)
 }
@@ -113,13 +116,21 @@ fn read_entry(z: &mut zip::ZipArchive<Cursor<&[u8]>>, name: &str) -> Result<Vec<
 /// Read one member, refusing it before inflating if it declares more than `max` bytes, and
 /// stopping at `max` if it inflates further than it declared.
 fn read_entry_max(z: &mut zip::ZipArchive<Cursor<&[u8]>>, name: &str, max: u64) -> Result<Vec<u8>> {
+    let mut left = max;
+    read_entry_budgeted(z, name, max, &mut left)
+}
+
+fn read_entry_budgeted(z: &mut zip::ZipArchive<Cursor<&[u8]>>, name: &str, max: u64, left: &mut u64) -> Result<Vec<u8>> {
     let f = z.by_name(name).map_err(|e| FormatError::Damaged(format!("{name}: {e}")))?;
     if f.size() > max {
         return Err(FormatError::Damaged(format!("{name} is too large")));
     }
     let mut out = Vec::with_capacity(f.size().min(64 << 20) as usize);
     let mut f = f.take(max.saturating_add(1));
-    f.read_to_end(&mut out).map_err(|e| FormatError::Damaged(format!("{name}: {e}")))?;
+    let res = f.read_to_end(&mut out);
+    // Charge what was inflated whether or not decompression succeeded.
+    *left = left.saturating_sub(out.len() as u64);
+    res.map_err(|e| FormatError::Damaged(format!("{name}: {e}")))?;
     if out.len() as u64 > max {
         return Err(FormatError::Damaged(format!("{name} is too large")));
     }
@@ -141,7 +152,7 @@ pub fn load_checked(bytes: &[u8]) -> Result<(Presentation, Vec<String>)> {
 
 fn load_within(bytes: &[u8], budget: Budget) -> Result<(Presentation, Vec<String>)> {
     let mut z = zip::ZipArchive::new(Cursor::new(bytes)).map_err(|e| FormatError::NotOurs(e.to_string()))?;
-    let json = read_entry(&mut z, "presentation.json").map_err(|_| FormatError::NotOurs("no presentation.json".into()))?;
+    let json = read_entry_max(&mut z, "presentation.json", MAX_MANIFEST_BYTES).map_err(|_| FormatError::NotOurs("no presentation.json".into()))?;
     let m = parse_manifest(&json)?;
     if m.format != "deckcraft" {
         return Err(FormatError::NotOurs(m.format));
@@ -160,16 +171,22 @@ fn load_within(bytes: &[u8], budget: Budget) -> Result<(Presentation, Vec<String
     for item in &mut p.media {
         let name = format!("media/{}", item.id.0);
         let linked_only = item.link.is_some() && z.index_for_name(&name).is_none();
+        if left == 0 {
+            damaged.push(format!("{name}: media budget exhausted"));
+            break;
+        }
         if z.by_name(&name).is_ok_and(|f| f.size() > left) {
             return Err(FormatError::Damaged("embedded media is larger than DeckCraft can open".into()));
         }
-        match read_entry_max(&mut z, &name, left.min(MAX_ENTRY)) {
+        match read_entry_budgeted(&mut z, &name, left.min(MAX_ENTRY), &mut left) {
             Ok(data) => {
-                left -= data.len() as u64;
                 item.data = Arc::new(data);
             }
             Err(_) if linked_only => {}
-            Err(e) => damaged.push(e.to_string()),
+            Err(e) => {
+                damaged.push(e.to_string());
+                break;
+            }
         }
     }
     chart_parts::restore(&mut p, &mut z, &mut left, items, budget.items, &mut damaged)?;
@@ -187,9 +204,10 @@ pub fn repair(p: &mut Presentation) {
     }
     p.fix_next_id();
     let first_layout = p.masters.first().and_then(|m| m.layouts.first()).map(|l| l.id).unwrap_or_default();
+    let known_layouts: std::collections::HashSet<_> = p.masters.iter().flat_map(|m| &m.layouts).map(|l| l.id).collect();
     let mut seen = std::collections::HashSet::new();
     for i in 0..p.slides.len() {
-        let needs_layout = p.slides.get(i).is_some_and(|s| p.layout(s.layout).is_none());
+        let needs_layout = p.slides.get(i).is_some_and(|s| !known_layouts.contains(&s.layout));
         let dup = p.slides.get(i).is_some_and(|s| !seen.insert(s.id));
         if needs_layout || dup {
             // An exhausted id space leaves a duplicate slide as it is: the engine refuses to
@@ -330,11 +348,11 @@ fn failure(src: &[u8]) -> std::result::Result<Manifest, (String, (usize, usize))
 /// nearest first, and a patch is kept only if the parse then gets further. (Files saved since
 /// [`finite::Finite`] never contain such `null`s; this reads older ones.)
 fn parse_manifest(json: &[u8]) -> Result<Manifest> {
-    let mut src = json.to_vec();
-    let mut last = match failure(&src) {
+    let mut last = match failure(json) {
         Ok(m) => return Ok(m),
         Err(f) => f,
     };
+    let mut src = json.to_vec();
     let mut budget = MAX_REPARSE_BYTES;
     'fixes: for _ in 0..MAX_NULL_FIXES {
         let (msg, pos) = &last;

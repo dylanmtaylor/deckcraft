@@ -71,9 +71,10 @@ impl Package {
                 continue;
             }
             let name = f.name().trim_start_matches('/').to_string();
+            let clean_name = name.replace('\r', "\\r").replace('\n', "\\n");
             let declared = f.size();
             if declared > max_part {
-                log::warn!("pptx: skipping oversized part {name} ({declared} bytes)");
+                log::warn!("pptx: skipping oversized part {clean_name} ({declared} bytes)");
                 continue;
             }
             let mut data = Vec::with_capacity(declared.min(16 * 1024 * 1024) as usize);
@@ -83,12 +84,12 @@ impl Package {
             work = work.saturating_add(data.len() as u64);
             match read {
                 Ok(_) if data.len() as u64 > cap => {
-                    log::warn!("pptx: part {name} exceeds size limits; skipped");
+                    log::warn!("pptx: part {clean_name} exceeds size limits; skipped");
                     continue;
                 }
                 Ok(_) => {}
                 Err(e) => {
-                    log::warn!("pptx: could not read {name}: {e}");
+                    log::warn!("pptx: could not read {clean_name}: {e}");
                     continue;
                 }
             }
@@ -104,7 +105,8 @@ impl Package {
     pub fn xml_bytes(&self, name: &str) -> Option<&[u8]> {
         let b = self.get(name)?;
         if b.len() > MAX_XML_PART {
-            log::warn!("pptx: XML part {name} too large");
+            let clean = name.replace('\r', "\\r").replace('\n', "\\n");
+            log::warn!("pptx: XML part {clean} too large");
             return None;
         }
         Some(b)
@@ -113,13 +115,15 @@ impl Package {
     pub fn xml(&self, name: &str) -> Option<xml::Doc> {
         let b = self.get(name)?;
         if b.len() > MAX_XML_PART {
-            log::warn!("pptx: XML part {name} too large");
+            let clean = name.replace('\r', "\\r").replace('\n', "\\n");
+            log::warn!("pptx: XML part {clean} too large");
             return None;
         }
         match xml::parse(b) {
             Ok(d) => Some(d),
             Err(e) => {
-                log::warn!("pptx: {name}: {e}");
+                let clean = name.replace('\r', "\\r").replace('\n', "\\n");
+                log::warn!("pptx: {clean}: {e}");
                 None
             }
         }

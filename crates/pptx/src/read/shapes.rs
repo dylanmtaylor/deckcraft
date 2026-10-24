@@ -767,6 +767,11 @@ fn table(imp: &mut Imp, part: &Part, tbl: &El) -> Table {
         let n = t.rows.iter().map(|r| r.cells.len()).max().unwrap_or(0);
         t.cols = vec![72.0; n];
     }
+    const MAX_TABLE_CELLS: usize = 50_000;
+    if !t.rows.is_empty() && t.cols.len() > MAX_TABLE_CELLS / t.rows.len() {
+        let max_cols = MAX_TABLE_CELLS / t.rows.len();
+        t.cols.truncate(max_cols);
+    }
     t.normalize();
     t
 }
