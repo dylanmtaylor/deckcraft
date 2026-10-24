@@ -102,7 +102,7 @@ impl Part {
 /// Prefixes declared below the root but not on it, skipping any bound to different namespaces.
 fn inner_decls(root: &El, ns: &[(String, String)]) -> Vec<(String, String)> {
     fn rec(e: &El, out: &mut Vec<(String, String)>, out_map: &mut HashMap<String, String>, clash: &mut HashSet<String>, depth: usize) {
-        if depth > crate::xml::MAX_DEPTH || out.len() >= 1000 {
+        if depth > crate::xml::MAX_DEPTH {
             return;
         }
         for (k, v) in e.attrs.iter().filter(|(k, _)| k.starts_with("xmlns:")) {
@@ -110,7 +110,7 @@ fn inner_decls(root: &El, ns: &[(String, String)]) -> Vec<(String, String)> {
                 if existing != v {
                     clash.insert(k.clone());
                 }
-            } else {
+            } else if out.len() < 1000 {
                 out_map.insert(k.clone(), v.clone());
                 out.push((k.clone(), v.clone()));
             }

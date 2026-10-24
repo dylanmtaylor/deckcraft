@@ -114,6 +114,7 @@ pub(crate) fn chartex_from(root: &El) -> Option<Chart> {
     c.legend = ch.child("legend").map(|l| l.attr("pos").unwrap_or("t").to_string());
     let mut kind = None;
     let mut output_budget = MAX_CHARTEX_POINTS;
+    let mut categories_set = false;
     for s in region.children_named("series").take(1000) {
         let layout = s.attr("layoutId").unwrap_or("");
         if layout == "paretoLine" {
@@ -130,16 +131,23 @@ pub(crate) fn chartex_from(root: &El) -> Option<Chart> {
             _ => k,
         });
         let d = datas.get(s.child("dataId").and_then(|i| i.attr("val")).unwrap_or("0"))?;
-        let (mut values, format) =
-            ["val", "size", "colorVal"].iter().find_map(|t| d.numbers.get(*t)).or_else(|| d.numbers.values().next()).cloned().unwrap_or_default();
-        if values.len() > output_budget {
-            values.truncate(output_budget);
-        }
+        let (values_src, format) = ["val", "size", "colorVal"]
+            .iter()
+            .find_map(|t| d.numbers.get(*t))
+            .or_else(|| d.numbers.values().next())
+            .map(|(v, f)| (v.as_slice(), f.clone()))
+            .unwrap_or((&[], None));
+        let take_len = values_src.len().min(output_budget);
+        let values = values_src[..take_len].to_vec();
         output_budget = output_budget.saturating_sub(values.len());
-        if c.categories.is_empty() {
+        if !categories_set {
+            categories_set = true;
             c.categories = d.categories.clone();
             c.category_levels = d.levels.clone();
             output_budget = output_budget.saturating_sub(c.categories.len());
+            for lvl in &c.category_levels {
+                output_budget = output_budget.saturating_sub(lvl.len());
+            }
         }
         if let Some(st) = s.child("layoutPr").and_then(|l| l.child("statistics")) {
             c.inclusive_quartiles = st.attr("quartileMethod") == Some("inclusive");

@@ -416,15 +416,7 @@ pub(crate) fn capture_kept(imp: &mut super::Imp, chart_part: &str) -> deckcraft_
 
     let key = crate::opc::norm(chart_part);
     if let Some(cached) = imp.kept_charts.get(&key) {
-        let mut kept = cached.clone();
-        for p in &mut kept.parts {
-            if imp.kept_sidecar_bytes + p.bytes.len() > MAX_KEPT_TOTAL_BYTES {
-                p.bytes = Vec::new();
-            } else {
-                imp.kept_sidecar_bytes += p.bytes.len();
-            }
-        }
-        return kept;
+        return cached.clone();
     }
 
     let mut kept = ChartKept::default();
@@ -443,7 +435,11 @@ pub(crate) fn capture_kept(imp: &mut super::Imp, chart_part: &str) -> deckcraft_
             kept.rels.push(ChartRel { id: r.id, rel_type: r.ty, target: r.target_raw, part: r.target, external: false });
         }
     }
-    imp.kept_charts.insert(key, kept.clone());
+    let mut cached = kept.clone();
+    for p in &mut cached.parts {
+        p.bytes = Vec::new();
+    }
+    imp.kept_charts.insert(key, cached);
     kept
 }
 
