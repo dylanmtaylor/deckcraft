@@ -140,7 +140,7 @@ pub(crate) fn chartex_from(root: &El) -> Option<Chart> {
         let take_len = values_src.len().min(output_budget);
         let values = values_src[..take_len].to_vec();
         output_budget = output_budget.saturating_sub(values.len());
-        if !categories_set {
+        if !categories_set && (!d.categories.is_empty() || !d.levels.is_empty()) {
             categories_set = true;
             c.categories = d.categories.clone();
             c.category_levels = d.levels.clone();
