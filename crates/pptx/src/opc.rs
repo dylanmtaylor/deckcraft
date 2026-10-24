@@ -387,7 +387,12 @@ impl PackageOut {
         if rels.items.is_empty() {
             return;
         }
-        self.files.push((rels_path(part), rels.to_xml(), true));
+        let path = rels_path(part);
+        if let Some(existing) = self.files.iter_mut().find(|(name, ..)| *name == path) {
+            existing.1 = rels.to_xml();
+        } else {
+            self.files.push((path, rels.to_xml(), true));
+        }
     }
     /// Add a part with no content type of its own (a relationships part).
     pub fn raw(&mut self, name: &str, data: Vec<u8>) {
