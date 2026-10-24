@@ -107,14 +107,16 @@ pub fn html_to_body(html: &str) -> Option<TextBody> {
             }
             if closing {
                 let kind = tag_kind(&name);
-                if !kind.is_empty()
-                    && let Some(pos) = stack.iter().rposition(|e| e.0 == kind)
-                {
-                    let (_, db, di, du) = stack[pos];
-                    bold -= db;
-                    italic -= di;
-                    underline -= du;
-                    stack.truncate(pos);
+                if !kind.is_empty() {
+                    let search_start = stack.len().saturating_sub(64);
+                    if let Some(offset) = stack[search_start..].iter().rposition(|e| e.0 == kind) {
+                        let pos = search_start + offset;
+                        let (_, db, di, du) = stack[pos];
+                        bold -= db;
+                        italic -= di;
+                        underline -= du;
+                        stack.truncate(pos);
+                    }
                 }
                 if is_block(&name) {
                     new_para(&mut paragraphs);
@@ -130,7 +132,7 @@ pub fn html_to_body(html: &str) -> Option<TextBody> {
                 bold += db;
                 italic += di;
                 underline += du;
-                if !token.ends_with('/') {
+                if !token.ends_with('/') && stack.len() < 128 {
                     stack.push((tag_kind(&name), db, di, du));
                 } else {
                     bold -= db;
@@ -302,9 +304,11 @@ fn decode_text(raw: &str) -> String {
     while let Some(at) = rest.find('&') {
         out.push_str(&collapse_space(&rest[..at]));
         rest = &rest[at..];
-        let Some(end) = rest.find(';') else {
-            out.push_str(&collapse_space(rest));
-            break;
+        let search_window = rest.len().min(32);
+        let Some(end) = rest[..search_window].find(';') else {
+            out.push('&');
+            rest = &rest[1..];
+            continue;
         };
         let entity = &rest[1..end];
         let decoded = match entity {
@@ -391,6 +395,10 @@ mod tests {
         assert_eq!(text("<p>R&D costs; up</p>"), "R&D costs; up");
         assert_eq!(text("<p>AT&T; Q&A</p>"), "AT&T; Q&A");
         assert_eq!(text("<p>A &amp; B &#38; C &#x26; D</p>"), "A & B & C & D");
+
+        // Verify many bare ampersands do not cause quadratic scan freeze
+        let hostile = format!("<p>{}</p>", "&".repeat(2000));
+        assert_eq!(text(&hostile), "&".repeat(2000));
     }
 
     #[test]
