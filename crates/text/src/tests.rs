@@ -394,6 +394,7 @@ fn autonum_formats() {
     assert_eq!(autonum("alphaLcParenR", 2), "b)");
     assert_eq!(autonum("arabicParenBoth", 1), "(1)");
     assert_eq!(autonum("alphaUcPeriod", 27), "AA.");
+    assert_eq!(autonum("alphaUcPeriod", u32::MAX).len(), 51); // 50 letters + '.'
 }
 
 #[test]

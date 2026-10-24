@@ -572,11 +572,10 @@ fn alpha_num(n: u32, upper: bool) -> String {
     if n == 0 {
         return String::new();
     }
-    let mut n = n - 1;
+    let n = n - 1;
     let c = (b'a' + (n % 26) as u8) as char;
-    let reps = n / 26 + 1;
-    n = reps;
-    let s: String = std::iter::repeat_n(c, n as usize).collect();
+    let reps = (n / 26 + 1).min(50);
+    let s: String = std::iter::repeat_n(c, reps as usize).collect();
     if upper { s.to_uppercase() } else { s }
 }
 
