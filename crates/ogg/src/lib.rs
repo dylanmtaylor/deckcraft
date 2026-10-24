@@ -351,9 +351,6 @@ impl CaptureScanner {
     fn find(&mut self, src: &(impl ByteSource + ?Sized), from: u64, len: u64) -> Result<Option<u64>> {
         let mut at = from;
         while at + 4 <= len {
-            if self.budget == 0 {
-                return Ok(None);
-            }
             let buf_end = self.buf_start + self.buf.len() as u64;
             if at >= self.buf_start && at + 4 <= buf_end {
                 let off = (at - self.buf_start) as usize;
@@ -362,6 +359,9 @@ impl CaptureScanner {
                 }
                 at = buf_end.saturating_sub(3);
                 continue;
+            }
+            if self.budget == 0 {
+                return Ok(None);
             }
             let n = ((len - at) as usize).min(64 * 1024).min(self.budget);
             if n < 4 {

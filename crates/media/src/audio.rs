@@ -100,7 +100,7 @@ fn decode_ogg_opus(bytes: &Bytes) -> Option<Result<Pcm>> {
         let timing = deckcraft_ogg::OpusTiming::of(stream, dec.pre_skip() as u32).map_err(|e| MediaError::Corrupt(e.to_string()))?;
         let mut out = Vec::new();
         for i in 0..stream.packets.len() {
-            if out.len() >= MAX_PCM_SAMPLES {
+            if MAX_PCM_SAMPLES.saturating_sub(out.len()) < channels.max(1) as usize {
                 break;
             }
             let Ok(p) = file.read_packet(src, s, i) else { continue };
@@ -136,7 +136,7 @@ fn decode_mkv_opus(bytes: &Bytes) -> Option<Result<Pcm>> {
         let mut out = Vec::new();
         let n = file.tracks.get(ti).map(|t| t.samples.len()).unwrap_or(0);
         for i in 0..n {
-            if out.len() >= MAX_PCM_SAMPLES {
+            if MAX_PCM_SAMPLES.saturating_sub(out.len()) < channels.max(1) as usize {
                 break;
             }
             let Ok(p) = file.read_sample(src, ti, i) else { continue };
