@@ -35,9 +35,9 @@ pub mod textures;
 pub mod theme;
 pub mod thumbs;
 pub mod toast;
+pub mod uifonts;
 #[cfg(not(target_arch = "wasm32"))]
 mod updates_ui;
-pub mod uifonts;
 pub mod widgets;
 
 use std::collections::HashMap;
