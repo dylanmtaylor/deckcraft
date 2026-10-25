@@ -35,6 +35,8 @@ pub mod textures;
 pub mod theme;
 pub mod thumbs;
 pub mod toast;
+#[cfg(not(target_arch = "wasm32"))]
+mod updates_ui;
 pub mod uifonts;
 pub mod widgets;
 
@@ -439,6 +441,7 @@ pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
         "{layout?, perPage?, slides?, includeHidden?, frame?, paper?: letter|a4|legal|a3, orientation?: portrait|landscape}",
     ),
     ("app.about", "About DeckCraft", None, "{}"),
+    ("app.checkUpdates", "Check for Updates…", None, "{}"),
     ("app.palette", "Command Palette", Some("Cmd+Shift+P"), "{}"),
     ("app.preferences", "Preferences…", Some("Cmd+,"), "{}"),
     ("app.openDialog", "Open…", None, "{purpose?}"),
@@ -592,6 +595,8 @@ pub struct SlideApp {
     /// creating or closing a presentation leaves it.
     pub backstage: Option<backstage::Backstage>,
     pending_urls: Vec<String>,
+    #[cfg(not(target_arch = "wasm32"))]
+    updates_rt: updates_ui::Runtime,
     /// Text for the system clipboard from a Copy or Cut command, handed over on the next frame.
     pending_copy: Option<String>,
     /// Bounded screenshot completion slots for the control channel (egui 0.37 callbacks).
@@ -834,6 +839,8 @@ impl SlideApp {
             integrated_titlebar: false,
             backstage: None,
             pending_urls: vec![],
+            #[cfg(not(target_arch = "wasm32"))]
+            updates_rt: updates_ui::Runtime::default(),
             pending_copy: None,
             capture: capture::Capture::default(),
             styled: false,
@@ -876,6 +883,13 @@ impl SlideApp {
 
     pub fn set_status(&mut self, msg: impl Into<String>) {
         self.status = Some((msg.into(), now_ms()));
+    }
+
+    /// Turn on the automatic check for a newer release at start-up (desktop shell only; tests and
+    /// the web build never touch the network on their own).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn enable_update_checks(&mut self) {
+        updates_ui::enable(self);
     }
 
     /// A message that must be seen wherever the user is: a toast, which also shows over the start
@@ -1352,6 +1366,12 @@ impl SlideApp {
                 return Ok(json!({"printed": self.print_pdf(p.clone())}));
             }
             "app.about" => self.dialog = Some(dialogs::Dialog::new("about")),
+            "app.checkUpdates" => {
+                #[cfg(not(target_arch = "wasm32"))]
+                updates_ui::request_check(self);
+                #[cfg(target_arch = "wasm32")]
+                return Err("updates are handled by the browser: reload the page".into());
+            }
             "app.palette" => self.palette = Some((String::new(), 0)),
             "app.preferences" => self.dialog = Some(dialogs::Dialog::new("preferences")),
             "app.openDialog" => self.pick_and_open(),
@@ -1982,6 +2002,8 @@ impl SlideApp {
         if !self.synthetic_batch_is_live(ctx) {
             self.drain_control(ctx);
             self.poll_opening();
+            #[cfg(not(target_arch = "wasm32"))]
+            updates_ui::tick(self, ctx);
             // Inbox results are host file bytes and do not need fonts or a painted frame. A
             // window that starts hidden must still apply a file picked before its first UI pass.
             self.drain_inbox();
@@ -3312,6 +3334,8 @@ impl SlideApp {
         toast::note_missing_fonts(self);
         toast::show(self, &ctx);
         dialogs::show(self, &ctx);
+        #[cfg(not(target_arch = "wasm32"))]
+        updates_ui::show(self, &ctx);
         menus::palette(self, &ctx);
         for url in std::mem::take(&mut self.pending_urls) {
             ctx.open_url(egui::OpenUrl::new_tab(url));
