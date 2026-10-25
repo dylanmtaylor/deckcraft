@@ -325,6 +325,9 @@ pub struct Renderer {
     in_shadow_pass: bool,
     /// Cumulative shape traversal counter to prevent nested group amplification DoS.
     render_work: usize,
+    /// Visits spent on outer-shadow silhouette passes, kept apart so they cannot use up the budget
+    /// of the normal drawing that follows.
+    shadow_work: usize,
 }
 
 impl Default for Renderer {
@@ -339,6 +342,7 @@ impl Default for Renderer {
             morphs: morph_path::Cache::default(),
             in_shadow_pass: false,
             render_work: 0,
+            shadow_work: 0,
         }
     }
 }
@@ -685,6 +689,7 @@ impl Renderer {
 
     fn slide(&mut self, pres: &Presentation, slide: &Slide, index: usize, opts: &RenderOpts) -> Image {
         self.render_work = 0;
+        self.shadow_work = 0;
         self.in_shadow_pass = false;
         let (mut ctx, w, h, view) = Self::canvas(pres, opts, needs_filters(pres, slide));
         let f = Frame { pres, opts, fields: Self::fields(pres, index, opts) };
@@ -699,6 +704,7 @@ impl Renderer {
 
     fn slide_part(&mut self, pres: &Presentation, slide: &Slide, index: usize, part: SlidePart, opts: &RenderOpts) -> Image {
         self.render_work = 0;
+        self.shadow_work = 0;
         self.in_shadow_pass = false;
         let (mut ctx, w, h, view) = Self::canvas(pres, opts, needs_filters(pres, slide));
         let f = Frame { pres, opts, fields: Self::fields(pres, index, opts) };
@@ -732,6 +738,7 @@ impl Renderer {
     ) -> Image {
         let mix = if mix.is_finite() { mix.clamp(0.0, 1.0) } else { 1.0 };
         self.render_work = 0;
+        self.shadow_work = 0;
         self.in_shadow_pass = false;
         let (mut ctx, w, h, view) = Self::canvas(pres, opts, needs_filters(pres, old.0) || needs_filters(pres, new.0));
         let (Some(co), Some(cn)) = (Ctx::for_slide(pres, old.0), Ctx::for_slide(pres, new.0)) else { return self.finish(ctx, w, h) };
@@ -781,6 +788,7 @@ impl Renderer {
 
     fn layout(&mut self, pres: &Presentation, mi: usize, li: Option<usize>, opts: &RenderOpts) -> Image {
         self.render_work = 0;
+        self.shadow_work = 0;
         self.in_shadow_pass = false;
         let (w, h) = output_size(pres, opts);
         let mut ctx = RenderContext::new_with(w, h, vello_cpu::RenderSettings { num_threads: 0, ..Default::default() });
@@ -910,8 +918,9 @@ impl Renderer {
         if depth > 32 || (s.hidden && !f.opts.show_hidden) || f.opts.skip.contains(&s.id) {
             return;
         }
-        self.render_work = self.render_work.saturating_add(1);
-        if self.render_work > 100_000 {
+        let work = if self.in_shadow_pass { &mut self.shadow_work } else { &mut self.render_work };
+        *work = work.saturating_add(1);
+        if *work > 100_000 {
             return;
         }
         // Footer placeholders on layouts/masters show only on slides that include them.
