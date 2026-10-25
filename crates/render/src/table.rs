@@ -285,9 +285,13 @@ pub fn cell_body_with_def(rctx: &Ctx, def: Option<&TableStyleDef>, t: &Table, r:
 /// text of each of its cells fits, as in PowerPoint. Files from pandoc or python-pptx store 0.
 /// Cells spanning several rows and vertical text keep the stored height.
 pub fn row_heights(rctx: &Ctx, t: &Table, fields: &dyn Fields) -> Vec<f64> {
+    row_heights_with_def(rctx, resolve_style(rctx, t), t, fields)
+}
+
+/// [`row_heights`] with the table's style already resolved, for a caller that needs it too.
+fn row_heights_with_def(rctx: &Ctx, style_def: Option<&TableStyleDef>, t: &Table, fields: &dyn Fields) -> Vec<f64> {
     let xs = edges(&t.cols);
     let mut out = Vec::with_capacity(t.rows.len());
-    let style_def = resolve_style(rctx, t);
     for (ri, row) in t.rows.iter().enumerate() {
         let mut h = row.height.max(0.0);
         for (ci, cell) in row.cells.iter().enumerate().take(t.cols.len()) {
@@ -361,9 +365,9 @@ pub fn draw(
     editing: bool,
 ) -> Option<kurbo::Rect> {
     let _ = pres;
-    let rects = cell_rects(t, &row_heights(rctx, t, fields));
-    let covered = rects.iter().map(|(_, _, r)| *r).reduce(|a, b| a.union(b));
     let style_def = resolve_style(rctx, t);
+    let rects = cell_rects(t, &row_heights_with_def(rctx, style_def, t, fields));
+    let covered = rects.iter().map(|(_, _, r)| *r).reduce(|a, b| a.union(b));
     let style_bg = style_def.and_then(|d| d.background.as_ref()).and_then(|b| style_fill(rctx, b));
     let own_bg = t.background.clone().map(|f| (f, None));
     if let Some(all) = rects.iter().map(|(_, _, r)| *r).reduce(|a, b| a.union(b)) {
