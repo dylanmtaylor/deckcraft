@@ -186,6 +186,8 @@ pub fn check(crates: &[Crate]) -> Vec<Violation> {
                     Some(Class::Testkit) if d.kind != DepKind::Dev => {
                         out.push(Violation::TestkitAsNormalDep { krate: c.name.clone() });
                     }
+                    // Test support is allowed as a dev-dependency, regardless of its layer.
+                    Some(Class::Testkit) => {}
                     Some(dc) => {
                         let to = dc.layer().unwrap_or(u8::MAX);
                         let dev_ok = d.kind == DepKind::Dev && DEV_EXCEPTIONS.contains(&(short_name(&c.name), short_name(&d.name)));
